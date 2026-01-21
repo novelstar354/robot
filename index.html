@@ -2,12 +2,12 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>ログイン前 人間確認（フル統合版）</title>
+  <title>あなたは人間ですか？</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
   <style>
-    html,body{margin:0;height:100%;font-family:system-ui;background:#0f172a;color:#e5ecff}
+    html,body{margin:0;height:100%;font-family:system-ui;background:#ffffff;color:#000000}
     .wrap{min-height:100%;display:grid;place-items:center;padding:16px}
-    .card{background:#020617;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,.4);padding:20px;max-width:420px;width:100%}
+    .card{background:#fff;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,.4);padding:20px;max-width:420px;width:100%}
     h1{font-size:18px;margin:0 0 8px}
     p{font-size:13px;opacity:.9;margin:0 0 12px}
     .step{border:1px solid #1f2a44;border-radius:12px;padding:12px;margin-bottom:12px;display:none}
@@ -26,11 +26,10 @@
 <body>
 <div class="wrap">
   <div class="card">
-    <h1>ログイン前 人間確認</h1>
-    <p>すべての確認を完了するとログイン画面へ進みます。</p>
+    <h1>人間確認</h1>
+    <p>すべての確認を完了すると進めます</p>
 
     <div class="step active" id="step1">
-      <strong>STEP 1：チェック</strong>
       <div class="row" style="margin-top:8px">
         <input id="chk" type="checkbox" />
         <label for="chk">私はロボットではありません</label>
@@ -38,7 +37,7 @@
     </div>
 
     <div class="step" id="step2">
-      <strong>STEP 2：ランダム問題（2連続正解）</strong>
+      <strong>STEP 2：ランダム問題</strong>
       <p class="small" id="qText"></p>
       <div class="row" id="qArea"></div>
       <div id="qRes" class="small"></div>
@@ -116,15 +115,49 @@ const r=10;let x=20,y=cv.height/2,drag=false,startT=0;
 const modes=['normal','zigzag','slow','reverse'];
 const mode=modes[Math.random()*modes.length|0];
 const goal={x:cv.width-30,y:cv.height/2,r:14};
+let goalTimer=null;
+let goalHidden=false;
 const wall=cv.width/2;
 
-function draw(){ctx.clearRect(0,0,cv.width,cv.height);
- ctx.beginPath();ctx.arc(goal.x,goal.y,goal.r,0,Math.PI*2);ctx.strokeStyle='#22c55e';ctx.stroke();
- if(mode==='zigzag'){ctx.beginPath();ctx.moveTo(wall,0);ctx.lineTo(wall,cv.height);ctx.strokeStyle='#ef4444';ctx.stroke();}
- ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle='#60a5fa';ctx.fill();
- ctx.fillStyle='#94a3b8';ctx.font='10px system-ui';ctx.fillText('MODE:'+mode,8,12);
+function draw(){
+ ctx.clearRect(0,0,cv.width,cv.height);
+ // ゴール（消えていなければ描画）
+ if(!goalHidden){
+   ctx.beginPath();
+   ctx.arc(goal.x,goal.y,goal.r,0,Math.PI*2);
+   ctx.strokeStyle='#22c55e';
+   ctx.stroke();
+ }
+ // 壁
+ if(mode==='zigzag'){
+   ctx.beginPath();ctx.moveTo(wall,0);ctx.lineTo(wall,cv.height);
+   ctx.strokeStyle='#ef4444';ctx.stroke();
+ }
+ // プレイヤー
+ ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
+ ctx.fillStyle='#60a5fa';ctx.fill();
+ ctx.fillStyle='#94a3b8';ctx.font='10px system-ui';
+ ctx.fillText('MODE:'+mode,8,12);
 }
-function goalCheck(){if(Math.hypot(x-goal.x,y-goal.y)<=goal.r){if(mode==='slow'&&Date.now()-startT<1500)return;done.drag=true;dragRes.textContent='到達！';dragRes.className='ok';update();}}
+function goalCheck(){
+  if(goalHidden) return;
+  const d = Math.hypot(x-goal.x,y-goal.y);
+  if(d <= goal.r){
+    if(mode==='slow' && Date.now()-startT < 1500) return;
+    if(!goalTimer){
+      dragRes.textContent='そのまま2秒待ってください…';
+      goalTimer = setTimeout(()=>{
+        goalHidden = true;
+        done.drag = true;
+        dragRes.textContent = '到達！';
+        dragRes.className = 'ok';
+        update();
+      },2000);
+    }
+  } else {
+    if(goalTimer){ clearTimeout(goalTimer); goalTimer=null; dragRes.textContent=''; }
+  }
+}}
 function hit(px,py){return Math.hypot(px-x,py-y)<=r;}
 draw();
 cv.onpointerdown=e=>{mark();const b=cv.getBoundingClientRect();const px=e.clientX-b.left,py=e.clientY-b.top;if(hit(px,py)){drag=true;startT=Date.now();cv.setPointerCapture(e.pointerId);}};
