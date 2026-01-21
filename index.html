@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>ログイン前 人間確認（フル統合版）</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <style>
+    html,body{margin:0;height:100%;font-family:system-ui;background:#0f172a;color:#e5ecff}
+    .wrap{min-height:100%;display:grid;place-items:center;padding:16px}
+    .card{background:#020617;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,.4);padding:20px;max-width:420px;width:100%}
+    h1{font-size:18px;margin:0 0 8px}
+    p{font-size:13px;opacity:.9;margin:0 0 12px}
+    .step{border:1px solid #1f2a44;border-radius:12px;padding:12px;margin-bottom:12px;display:none}
+    .step.active{display:block}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    button{background:#2563eb;color:white;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
+    button.secondary{background:#1f2a44}
+    .ok{color:#22c55e}
+    .ng{color:#ef4444}
+    .progress{height:6px;background:#0b1225;border-radius:999px;overflow:hidden}
+    .bar{height:100%;width:0%;background:#22c55e;transition:width .3s}
+    canvas{background:#020617;border:1px solid #1f2a44;border-radius:10px;touch-action:none}
+    .small{font-size:12px;opacity:.8}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>ログイン前 人間確認</h1>
+    <p>すべての確認を完了するとログイン画面へ進みます。</p>
+
+    <div class="step active" id="step1">
+      <strong>STEP 1：チェック</strong>
+      <div class="row" style="margin-top:8px">
+        <input id="chk" type="checkbox" />
+        <label for="chk">私はロボットではありません</label>
+      </div>
+    </div>
+
+    <div class="step" id="step2">
+      <strong>STEP 2：ランダム問題（2連続正解）</strong>
+      <p class="small" id="qText"></p>
+      <div class="row" id="qArea"></div>
+      <div id="qRes" class="small"></div>
+    </div>
+
+    <div class="step" id="step3">
+      <strong>STEP 3：ドラッグ操作</strong>
+      <p class="small">円をゴールまでドラッグしてください</p>
+      <canvas id="cv" width="320" height="140"></canvas>
+      <div id="dragRes" class="small"></div>
+    </div>
+
+    <div class="progress"><div class="bar" id="bar"></div></div>
+    <div style="margin-top:12px" id="final"></div>
+  </div>
+</div>
+
+<script>
+/* ========= 共通 & チート対策 ========= */
+const bar = document.getElementById('bar');
+// 失敗回数ロック（5回で5分）
+let failCount = Number(localStorage.getItem('fail_count')||0);
+let lockUntil = Number(localStorage.getItem('lock_until')||0);
+if(Date.now() < lockUntil){
+  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100%;color:#ef4444;font-size:18px">あなたはロボットです<br><small>5分後に再試行できます</small></div>';
+  throw new Error('locked');
+}
+let done = {math:false, drag:false};
+let focusLost=false, suspicious=false, lastAction=0;
+window.addEventListener('blur',()=>focusLost=true);
+document.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('copy',e=>e.preventDefault());
+function mark(){const n=Date.now(); if(lastAction && n-lastAction<150) suspicious=true; lastAction=n;}
+function block(){const f=document.getElementById('final');f.textContent='不正操作が検出されました。再読み込みしてください。';f.className='ng';throw new Error('blocked');}
+function update(){if(focusLost||suspicious) block();const p=(Object.values(done).filter(Boolean).length/2)*100;bar.style.width=p+'%';if(p===100){const token=crypto.randomUUID();sessionStorage.setItem('human_token',token);const f=document.getElementById('final');f.textContent='確認完了。ログイン画面へ移動します…';f.className='ok';setTimeout(()=>location.href='login.html?token='+token,2000);}}
+
+/* ========= STEP1 ========= */
+document.getElementById('chk').onchange=e=>{mark();if(e.target.checked){document.getElementById('step2').classList.add('active');nextQ();}};
+
+/* ========= STEP2 問題 ========= */
+const qText=document.getElementById('qText');
+const qArea=document.getElementById('qArea');
+const qRes=document.getElementById('qRes');
+let streak=0, qStart=0;
+
+const questions=[
+// 計算
+
+()=>{const a=1+Math.random()*9|0,b=1+Math.random()*9|0;qText.textContent=`${a}+${b} は？`;qArea.innerHTML='<input id="ans" type="number"><button class="secondary" id="ok">確認</button>';qStart=Date.now();ok.onclick=()=>{mark();Date.now()-qStart<500?fail():Number(ans.value)==a+b?success():fail();};},
+()=>{const c=['赤','青','緑','黄'],ans=c[Math.random()*4|0];qText.textContent=`「${ans}」を選択`;qArea.innerHTML=c.map(v=>`<button class="secondary">${v}</button>`).join('');qStart=Date.now();[...qArea.children].forEach(b=>b.onclick=()=>{mark();Date.now()-qStart<400?fail():b.textContent==ans?success():fail();});},
+()=>{const n=2+Math.random()*3|0;qText.textContent=`${n}秒待ってOK`;qArea.innerHTML='<button class="secondary" id="w">OK</button>';const s=Date.now();w.onclick=()=>{mark();Date.now()-s>=n*1000?success():fail();};}
+  ,
+// 大小比較
+()=>{const a=1+Math.random()*20|0,b=1+Math.random()*20|0;qText.textContent=`${a} と ${b}、大きいのは？`;qArea.innerHTML=`<button class=secondary>${a}</button><button class=secondary>${b}</button>`;qStart=Date.now();[...qArea.children].forEach(btn=>btn.onclick=()=>{mark();Date.now()-qStart<400?fail():Number(btn.textContent)===Math.max(a,b)?success():fail();});},
+// ひらがな判定
+()=>{const arr=['あ','ア','a','1'];const c=arr[Math.random()*arr.length|0];qText.textContent=`ひらがなを選んでください`;qArea.innerHTML=arr.map(v=>`<button class=secondary>${v}</button>`).join('');qStart=Date.now();[...qArea.children].forEach(btn=>btn.onclick=()=>{mark();btn.textContent==='あ'?success():fail();});}
+];
+
+function nextQ(){qText.textContent='';qArea.innerHTML='';qRes.textContent='';setTimeout(()=>questions[Math.random()*questions.length|0](),300);}
+function success(){streak++;qText.textContent='';qArea.innerHTML='';if(streak>=2){qRes.textContent='2連続正解！';qRes.className='ok';done.math=true;document.getElementById('step3').classList.add('active');update();}else{qRes.textContent='正解！次へ';qRes.className='ok';setTimeout(nextQ,600);}}
+function fail(){
+  failCount++;
+  localStorage.setItem('fail_count',failCount);
+  if(failCount>=5){
+    const until = Date.now()+5*60*1000;
+    localStorage.setItem('lock_until',until);
+    document.body.innerHTML = '<div style="display:grid;place-items:center;height:100%;color:#ef4444;font-size:18px">あなたはロボットです<br><small>5分間ロックされました</small></div>';
+    throw new Error('locked');
+  }
+streak=0;qText.textContent='';qArea.innerHTML='';qRes.textContent='不正解。やり直し';qRes.className='ng';setTimeout(nextQ,700);}
+
+/* ========= STEP3 ドラッグ ========= */
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+const r=10;let x=20,y=cv.height/2,drag=false,startT=0;
+const modes=['normal','zigzag','slow','reverse'];
+const mode=modes[Math.random()*modes.length|0];
+const goal={x:cv.width-30,y:cv.height/2,r:14};
+const wall=cv.width/2;
+
+function draw(){ctx.clearRect(0,0,cv.width,cv.height);
+ ctx.beginPath();ctx.arc(goal.x,goal.y,goal.r,0,Math.PI*2);ctx.strokeStyle='#22c55e';ctx.stroke();
+ if(mode==='zigzag'){ctx.beginPath();ctx.moveTo(wall,0);ctx.lineTo(wall,cv.height);ctx.strokeStyle='#ef4444';ctx.stroke();}
+ ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle='#60a5fa';ctx.fill();
+ ctx.fillStyle='#94a3b8';ctx.font='10px system-ui';ctx.fillText('MODE:'+mode,8,12);
+}
+function goalCheck(){if(Math.hypot(x-goal.x,y-goal.y)<=goal.r){if(mode==='slow'&&Date.now()-startT<1500)return;done.drag=true;dragRes.textContent='到達！';dragRes.className='ok';update();}}
+function hit(px,py){return Math.hypot(px-x,py-y)<=r;}
+draw();
+cv.onpointerdown=e=>{mark();const b=cv.getBoundingClientRect();const px=e.clientX-b.left,py=e.clientY-b.top;if(hit(px,py)){drag=true;startT=Date.now();cv.setPointerCapture(e.pointerId);}};
+cv.onpointermove=e=>{if(!drag)return;const b=cv.getBoundingClientRect();let nx=e.clientX-b.left,ny=e.clientY-b.top;if(mode==='reverse')ny=cv.height-ny;if(mode==='zigzag'&&x<wall&&nx>=wall)return;x=Math.max(r,Math.min(cv.width-r,nx));y=Math.max(r,Math.min(cv.height-r,ny));draw();goalCheck();};
+cv.onpointerup=()=>drag=false;
+</script>
+</body>
+</html>
