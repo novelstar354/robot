@@ -8,12 +8,13 @@
 <style>
 html,body{margin:0;height:100%;background:#020617;color:#e5ecff;font-family:system-ui}
 .wrap{display:grid;place-items:center;height:100%}
-.box{background:#0f172a;padding:20px;border-radius:14px;width:340px;text-align:center}
-button{padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;font-size:14px;margin:4px}
-canvas{background:#020617;border-radius:12px;margin-top:12px;touch-action:none}
+.box{background:#0f172a;padding:20px;border-radius:16px;width:340px;text-align:center;box-shadow:0 0 30px #000}
+button{padding:10px 16px;border-radius:10px;border:none;background:#2563eb;color:#fff;font-size:14px;margin:6px}
+canvas{background:#020617;border-radius:14px;margin-top:12px;touch-action:none}
 .hidden{display:none}
 .lock{color:#f87171;font-weight:bold}
-.small{font-size:11px;opacity:.6;margin-top:6px}
+.ok{color:#22c55e;font-weight:bold}
+.warn{color:#facc15}
 </style>
 </head>
 <body>
@@ -21,18 +22,19 @@ canvas{background:#020617;border-radius:12px;margin-top:12px;touch-action:none}
  <div class="box">
   <h2>人間確認</h2>
   <label><input type="checkbox" id="chk"> 私はロボットではありません</label>
+  <p id="env" class="warn"></p>
   <div id="q" class="hidden">
    <p id="qtext"></p>
    <div id="answers"></div>
-   <canvas id="cv" width="260" height="260" class="hidden"></canvas>
+   <canvas id="cv" width="280" height="280" class="hidden"></canvas>
   </div>
   <p id="msg"></p>
-  <div id="fp" class="small"></div>
  </div>
 </div>
+
 <script>
+/************ 基本状態 ************/
 let correct=0,fail=0,entropy=0;
-const LOCK=5*60*1000;
 const chk=document.getElementById('chk');
 const q=document.getElementById('q');
 const msg=document.getElementById('msg');
@@ -40,118 +42,144 @@ const qtext=document.getElementById('qtext');
 const answers=document.getElementById('answers');
 const cv=document.getElementById('cv');
 const ctx=cv.getContext('2d');
-const fpEl=document.getElementById('fp');
 let goal,x,y,r=12,drag=false,hold=null;
 
-// ===== Fingerprint =====
-async function fingerprint(){
-const c=document.createElement('canvas');
-const x=c.getContext('2d');
-x.textBaseline='top';x.font='14px Arial';x.fillText(navigator.userAgent,2,2);
-const data=[
-navigator.userAgent,
-screen.width+'x'+screen.height,
-screen.colorDepth,
-Intl.DateTimeFormat().resolvedOptions().timeZone,
-navigator.language,
-navigator.hardwareConcurrency,
-navigator.platform,
-c.toDataURL()
-].join('|');
-const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(data));
-return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
+/************ 環境判定（軽量） ************/
+const env=document.getElementById('env');
+if(!('ontouchstart' in window)){
+ env.textContent='※ スマートフォン操作が推奨されます';
 }
+if(navigator.webdriver){ entropy+=2; }
+if(navigator.hardwareConcurrency<=2){ entropy++; }
 
-(async()=>{
-const fp=await fingerprint();
-const old=localStorage.getItem('fp');
-if(old && old!==fp) entropy+=2;
-localStorage.setItem('fp',fp);
-fpEl.textContent='Fingerprint: '+fp.slice(0,16)+'…';
-})();
-
-// Lock
-const locked=localStorage.getItem('lock');
-if(locked && Date.now()<locked){
-msg.innerHTML='<span class="lock">あなたはロボットです<br>5分間ロック中</span>';
-chk.disabled=true;
+/************ ロック管理（段階式） ************/
+const BASE_LOCK=5*60*1000;
+let lockLevel=parseInt(localStorage.getItem('lockLv')||'0');
+const lockedUntil=parseInt(localStorage.getItem('lockUntil')||'0');
+if(Date.now()<lockedUntil){
+ msg.innerHTML='<span class="lock">あなたはロボットです<br>'+(lockLevel+1)+'段階ロック中</span>';
+ chk.disabled=true;
 }
 
 chk.onchange=()=>{ if(chk.checked) nextQuestion(); };
 
+/************ 問題制御 ************/
 function nextQuestion(){
-q.classList.remove('hidden');answers.innerHTML='';cv.classList.add('hidden');msg.textContent='';
-const base=['calc','color','compare','drag'];
-const mobile=('ontouchstart' in window);
-if(mobile) base.push('gesture');
-const t=base[Math.floor(Math.random()*base.length)];
-({calc:calcQ,color:colorQ,compare:compareQ,drag:dragQ,gesture:gestureQ})[t]();
+ q.classList.remove('hidden');
+ answers.innerHTML='';
+ cv.classList.add('hidden');
+ msg.textContent='';
+ const pool=['calc','color','compare','drag','gesture','memory'];
+ const t=pool[Math.floor(Math.random()*pool.length)];
+ ({calc:calcQ,color:colorQ,compare:compareQ,drag:dragQ,gesture:gestureQ,memory:memoryQ})[t]();
 }
 
 function success(){
-correct++;q.classList.add('hidden');
-if(correct>=3){msg.textContent='確認完了';}
-else setTimeout(nextQuestion,400);
+ correct++; q.classList.add('hidden');
+ if(correct>=2 && entropy<5){
+  msg.innerHTML='<span class="ok">確認完了。移動します…</span>';
+  setTimeout(()=>location.href='https://example.com',2000);
+ }else{
+  setTimeout(nextQuestion,600);
+ }
 }
+
 function failure(){
-fail++;correct=0;q.classList.add('hidden');entropy++;
-if(fail+entropy>=5){localStorage.setItem('lock',Date.now()+LOCK);
-msg.innerHTML='<span class="lock">あなたはロボットです<br>5分間ロック</span>';chk.disabled=true;}
-else setTimeout(nextQuestion,400);
+ fail++; correct=0; entropy++;
+ q.classList.add('hidden');
+ if(fail>=5 || entropy>=6){
+  lockLevel++;
+  localStorage.setItem('lockLv',lockLevel);
+  const lockTime=BASE_LOCK*Math.pow(2,lockLevel);
+  localStorage.setItem('lockUntil',Date.now()+lockTime);
+  msg.innerHTML='<span class="lock">あなたはロボットです<br>'+(lockTime/60000)+'分ロック</span>';
+  chk.disabled=true;
+ }else{
+  setTimeout(nextQuestion,600);
+ }
 }
 
-function btn(txt,ok){const b=document.createElement('button');b.textContent=txt;b.onclick=()=>ok?success():failure();answers.appendChild(b);}
+/************ 問題群 ************/
+function calcQ(){
+ const a=rand(5,20),b=rand(5,20);
+ qtext.textContent=`${a}+${b}は？`;
+ shuffle([a+b,a+b+rand(1,3),a+b-rand(1,3)]).forEach(v=>btn(v,v===a+b));
+}
 
-function calcQ(){const a=~~(Math.random()*20),b=~~(Math.random()*20);qtext.textContent=`${a}+${b}は？`;[a+b,a+b+1,a+b-1].sort(()=>Math.random()-.5).forEach(v=>btn(v,v===a+b));}
-function colorQ(){qtext.textContent='青色を選んでください';['赤','青','緑','黄'].sort(()=>Math.random()-.5).forEach(v=>btn(v,v==='青'));}
-function compareQ(){const a=~~(Math.random()*99),b=~~(Math.random()*99);qtext.textContent=`大きい方は？ (${a}/${b})`;btn(a,a>b);btn(b,b>a);}
+function colorQ(){
+ const map={赤:'#f87171',青:'#60a5fa',緑:'#4ade80'};
+ qtext.textContent='文字と同じ「色」を選んでください';
+ const keys=shuffle(Object.keys(map));
+ qtext.style.color=map[keys[1]];
+ keys.forEach(k=>btn(k,k===keys[1]));
+}
+
+function compareQ(){
+ const a=rand(10,99),b=rand(10,99);
+ qtext.textContent=`大きい方は？ (${a} / ${b})`;
+ btn(a,a>b);btn(b,b>a);
+}
 
 function dragQ(){
-qtext.textContent='丸を中心に2秒置いてください';
-cv.classList.remove('hidden');
-goal={x:130,y:130,r:30};
-x=30;y=130;drag=false;hold=null;
-draw();
-cv.onpointerdown=e=>{
-drag=true;
-cv.setPointerCapture(e.pointerId);
-};
-cv.onpointerup=e=>{
-drag=false;
-cv.releasePointerCapture(e.pointerId);
-if(hold){clearTimeout(hold);hold=null;}
-};
-cv.onpointermove=e=>{
-if(!drag)return;
-const rect=cv.getBoundingClientRect();
-x=e.clientX-rect.left;
-y=e.clientY-rect.top;
-const d=Math.hypot(x-goal.x,y-goal.y);
-if(d<=goal.r){
-if(!hold){
-hold=setTimeout(()=>{
-draw(false);
-msg.textContent='成功！移動します…';
-setTimeout(()=>location.href='[https://example.com',2000](https://example.com',2000));
-},2000);
+ qtext.textContent='円を中心で2秒間保持してください';
+ cv.classList.remove('hidden');
+ goal={x:140,y:140,r:32}; x=40;y=140; draw();
+ cv.onpointerdown=()=>drag=true;
+ cv.onpointerup=()=>{drag=false;hold&&clearTimeout(hold);hold=null};
+ cv.onpointermove=e=>{
+  if(!drag)return;
+  const rct=cv.getBoundingClientRect();
+  x=e.clientX-rct.left;y=e.clientY-rct.top;
+  const d=Math.hypot(x-goal.x,y-goal.y);
+  if(d<=goal.r){ if(!hold) hold=setTimeout(()=>{draw(false);success();},2000); }
+  else{ hold&&clearTimeout(hold);hold=null; }
+  draw();
+ };
 }
-}else{
-if(hold){clearTimeout(hold);hold=null;}
-}
-draw();
-};
-}
-
-function draw(show=true){ctx.clearRect(0,0,260,260);if(show){ctx.beginPath();ctx.arc(goal.x,goal.y,goal.r,0,7);ctx.strokeStyle='#22c55e';ctx.stroke();}
-ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle='#60a5fa';ctx.fill();}
 
 function gestureQ(){
-qtext.textContent='右→下→左 にスワイプしてください';let seq=['r','d','l'],i=0,sx,sy;
-cv.classList.remove('hidden');ctx.clearRect(0,0,260,260);
-cv.onpointerdown=e=>{sx=e.clientX;sy=e.clientY};
-cv.onpointerup=e=>{const dx=e.clientX-sx,dy=e.clientY-sy;let g=Math.abs(dx)>Math.abs(dy)?(dx>0?'r':'l'):(dy>0?'d':'u');
-if(g===seq[i]){i++;if(i===seq.length)success();}else failure();};
-} </script>
+ if(!('ontouchstart' in window)) return nextQuestion();
+ cv.classList.remove('hidden'); answers.innerHTML='';
+ const patterns=['Z','circle','LRD','UD','zigzag','reverseC','spiral'];
+ const p=patterns[Math.floor(Math.random()*patterns.length)];
+ qtext.textContent='ジェスチャー：'+p;
+ let path=[]; ctx.clearRect(0,0,cv.width,cv.height); ctx.beginPath();
+ cv.onpointerdown=e=>{drag=true;path=[[e.offsetX,e.offsetY]];ctx.moveTo(e.offsetX,e.offsetY)};
+ cv.onpointermove=e=>{ if(!drag)return; path.push([e.offsetX,e.offsetY]); ctx.lineTo(e.offsetX,e.offsetY); ctx.strokeStyle='#22c55e'; ctx.stroke(); };
+ cv.onpointerup=()=>{drag=false;checkGesture(p,path)};
+}
+
+function memoryQ(){
+ qtext.textContent='3秒後に消える順番を覚えてください';
+ const seq=shuffle(['▲','●','■']).slice(0,3);
+ qtext.textContent=seq.join(' ');
+ setTimeout(()=>{
+  qtext.textContent='順番通り選んでください'; answers.innerHTML='';
+  seq.forEach((v,i)=>btn(v,i===0?true:false));
+ },3000);
+}
+
+function checkGesture(p,path){
+ if(path.length<15) return failure();
+ const sx=path[0][0],sy=path[0][1];
+ const ex=path.at(-1)[0],ey=path.at(-1)[1];
+ const dx=ex-sx,dy=ey-sy;
+ if(p==='circle'&&Math.abs(dx)<30&&Math.abs(dy)<30) return success();
+ if(p==='Z'&&dx>60&&dy>40) return success();
+ if(p==='LRD'&&dx>40&&dy>40) return success();
+ if(p==='UD'&&Math.abs(dx)<30&&dy>60) return success();
+ if(p==='zigzag'&&path.some((p,i)=>i>5&&Math.sign(path[i][0]-path[i-5][0])<0)) return success();
+ if(p==='reverseC'&&dx<0&&Math.abs(dy)<40) return success();
+ if(p==='spiral'&&Math.abs(dx)<40&&Math.abs(dy)<40&&path.length>30) return success();
+ failure();
+}
+
+/************ 共通 ************/
+function btn(txt,ok){ const b=document.createElement('button'); b.textContent=txt; b.onclick=()=>ok?success():failure(); answers.appendChild(b); }
+function draw(showGoal=true){ ctx.clearRect(0,0,cv.width,cv.height); if(showGoal){ctx.beginPath();ctx.arc(goal.x,goal.y,goal.r,0,Math.PI*2);ctx.strokeStyle='#22c55e';ctx.stroke();} ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle='#60a5fa';ctx.fill(); }
+function rand(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+function shuffle(a){return a.sort(()=>Math.random()-0.5)}
+</script>
 
 </body>
 </html>
