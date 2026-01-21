@@ -107,13 +107,41 @@ function colorQ(){qtext.textContent='青色を選んでください';['赤','青
 function compareQ(){const a=~~(Math.random()*99),b=~~(Math.random()*99);qtext.textContent=`大きい方は？ (${a}/${b})`;btn(a,a>b);btn(b,b>a);}
 
 function dragQ(){
-qtext.textContent='丸を中心に2秒置いてください';cv.classList.remove('hidden');
-goal={x:130,y:130,r:30};x=30;y=130;draw();
-cv.onpointerdown=()=>drag=true;
-cv.onpointerup=()=>{drag=false;if(hold){clearTimeout(hold);hold=null}};
-cv.onpointermove=e=>{if(!drag)return;const r=cv.getBoundingClientRect();x=e.clientX-r.left;y=e.clientY-r.top;const d=Math.hypot(x-goal.x,y-goal.y);
-if(d<=goal.r){if(!hold)hold=setTimeout(()=>{draw(false);success();},2000);}else{if(hold){clearTimeout(hold);hold=null}}draw();};
+qtext.textContent='丸を中心に2秒置いてください';
+cv.classList.remove('hidden');
+goal={x:130,y:130,r:30};
+x=30;y=130;drag=false;hold=null;
+draw();
+cv.onpointerdown=e=>{
+drag=true;
+cv.setPointerCapture(e.pointerId);
+};
+cv.onpointerup=e=>{
+drag=false;
+cv.releasePointerCapture(e.pointerId);
+if(hold){clearTimeout(hold);hold=null;}
+};
+cv.onpointermove=e=>{
+if(!drag)return;
+const rect=cv.getBoundingClientRect();
+x=e.clientX-rect.left;
+y=e.clientY-rect.top;
+const d=Math.hypot(x-goal.x,y-goal.y);
+if(d<=goal.r){
+if(!hold){
+hold=setTimeout(()=>{
+draw(false);
+msg.textContent='成功！移動します…';
+setTimeout(()=>location.href='[https://example.com',2000](https://example.com',2000));
+},2000);
 }
+}else{
+if(hold){clearTimeout(hold);hold=null;}
+}
+draw();
+};
+}
+
 function draw(show=true){ctx.clearRect(0,0,260,260);if(show){ctx.beginPath();ctx.arc(goal.x,goal.y,goal.r,0,7);ctx.strokeStyle='#22c55e';ctx.stroke();}
 ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle='#60a5fa';ctx.fill();}
 
@@ -124,4 +152,6 @@ cv.onpointerdown=e=>{sx=e.clientX;sy=e.clientY};
 cv.onpointerup=e=>{const dx=e.clientX-sx,dy=e.clientY-sy;let g=Math.abs(dx)>Math.abs(dy)?(dx>0?'r':'l'):(dy>0?'d':'u');
 if(g===seq[i]){i++;if(i===seq.length)success();}else failure();};
 } </script>
-</
+
+</body>
+</html>
