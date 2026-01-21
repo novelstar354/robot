@@ -1,168 +1,127 @@
 <!doctype html>
+
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <title>あなたは人間ですか？</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <style>
-    html,body{margin:0;height:100%;font-family:system-ui;background:#ffffff;color:#000000}
-    .wrap{min-height:100%;display:grid;place-items:center;padding:16px}
-    .card{background:#fff;border-radius:16px;box-shadow:0 20px 40px rgba(0,0,0,.4);padding:20px;max-width:420px;width:100%}
-    h1{font-size:18px;margin:0 0 8px}
-    p{font-size:13px;opacity:.9;margin:0 0 12px}
-    .step{border:1px solid #1f2a44;border-radius:12px;padding:12px;margin-bottom:12px;display:none}
-    .step.active{display:block}
-    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    button{background:#2563eb;color:white;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
-    button.secondary{background:#1f2a44}
-    .ok{color:#22c55e}
-    .ng{color:#ef4444}
-    .progress{height:6px;background:#0b1225;border-radius:999px;overflow:hidden}
-    .bar{height:100%;width:0%;background:#22c55e;transition:width .3s}
-    canvas{background:#020617;border:1px solid #1f2a44;border-radius:10px;touch-action:none}
-    .small{font-size:12px;opacity:.8}
-  </style>
+<meta charset="utf-8">
+<title>人間確認（防御レベルMAX）</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+html,body{margin:0;height:100%;background:#020617;color:#e5ecff;font-family:system-ui}
+.wrap{display:grid;place-items:center;height:100%}
+.box{background:#0f172a;padding:20px;border-radius:14px;width:340px;text-align:center}
+button{padding:10px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;font-size:14px;margin:4px}
+canvas{background:#020617;border-radius:12px;margin-top:12px;touch-action:none}
+.hidden{display:none}
+.lock{color:#f87171;font-weight:bold}
+.small{font-size:11px;opacity:.6;margin-top:6px}
+</style>
 </head>
 <body>
 <div class="wrap">
-  <div class="card">
-    <h1>人間確認</h1>
-    <p>すべての確認を完了すると進めます</p>
-
-    <div class="step active" id="step1">
-      <div class="row" style="margin-top:8px">
-        <input id="chk" type="checkbox" />
-        <label for="chk">私はロボットではありません</label>
-      </div>
-    </div>
-
-    <div class="step" id="step2">
-      <strong>STEP 2：ランダム問題</strong>
-      <p class="small" id="qText"></p>
-      <div class="row" id="qArea"></div>
-      <div id="qRes" class="small"></div>
-    </div>
-
-    <div class="step" id="step3">
-      <strong>STEP 3：ドラッグ操作</strong>
-      <p class="small">円をゴールまでドラッグしてください</p>
-      <canvas id="cv" width="320" height="140"></canvas>
-      <div id="dragRes" class="small"></div>
-    </div>
-
-    <div class="progress"><div class="bar" id="bar"></div></div>
-    <div style="margin-top:12px" id="final"></div>
+ <div class="box">
+  <h2>人間確認</h2>
+  <label><input type="checkbox" id="chk"> 私はロボットではありません</label>
+  <div id="q" class="hidden">
+   <p id="qtext"></p>
+   <div id="answers"></div>
+   <canvas id="cv" width="260" height="260" class="hidden"></canvas>
   </div>
+  <p id="msg"></p>
+  <div id="fp" class="small"></div>
+ </div>
 </div>
-
 <script>
-/* ========= 共通 & チート対策 ========= */
-const bar = document.getElementById('bar');
-// 失敗回数ロック（5回で5分）
-let failCount = Number(localStorage.getItem('fail_count')||0);
-let lockUntil = Number(localStorage.getItem('lock_until')||0);
-if(Date.now() < lockUntil){
-  document.body.innerHTML = '<div style="display:grid;place-items:center;height:100%;color:#ef4444;font-size:18px">あなたはロボットです<br><small>5分後に再試行できます</small></div>';
-  throw new Error('locked');
+let correct=0,fail=0,entropy=0;
+const LOCK=5*60*1000;
+const chk=document.getElementById('chk');
+const q=document.getElementById('q');
+const msg=document.getElementById('msg');
+const qtext=document.getElementById('qtext');
+const answers=document.getElementById('answers');
+const cv=document.getElementById('cv');
+const ctx=cv.getContext('2d');
+const fpEl=document.getElementById('fp');
+let goal,x,y,r=12,drag=false,hold=null;
+
+// ===== Fingerprint =====
+async function fingerprint(){
+const c=document.createElement('canvas');
+const x=c.getContext('2d');
+x.textBaseline='top';x.font='14px Arial';x.fillText(navigator.userAgent,2,2);
+const data=[
+navigator.userAgent,
+screen.width+'x'+screen.height,
+screen.colorDepth,
+Intl.DateTimeFormat().resolvedOptions().timeZone,
+navigator.language,
+navigator.hardwareConcurrency,
+navigator.platform,
+c.toDataURL()
+].join('|');
+const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(data));
+return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
 }
-let done = {math:false, drag:false};
-let focusLost=false, suspicious=false, lastAction=0;
-window.addEventListener('blur',()=>focusLost=true);
-document.addEventListener('contextmenu',e=>e.preventDefault());
-document.addEventListener('copy',e=>e.preventDefault());
-function mark(){const n=Date.now(); if(lastAction && n-lastAction<150) suspicious=true; lastAction=n;}
-function block(){const f=document.getElementById('final');f.textContent='不正操作が検出されました。再読み込みしてください。';f.className='ng';throw new Error('blocked');}
-function update(){if(focusLost||suspicious) block();const p=(Object.values(done).filter(Boolean).length/2)*100;bar.style.width=p+'%';if(p===100){const token=crypto.randomUUID();sessionStorage.setItem('human_token',token);const f=document.getElementById('final');f.textContent='確認完了。ログイン画面へ移動します…';f.className='ok';setTimeout(()=>location.href='login.html?token='+token,2000);}}
 
-/* ========= STEP1 ========= */
-document.getElementById('chk').onchange=e=>{mark();if(e.target.checked){document.getElementById('step2').classList.add('active');nextQ();}};
+(async()=>{
+const fp=await fingerprint();
+const old=localStorage.getItem('fp');
+if(old && old!==fp) entropy+=2;
+localStorage.setItem('fp',fp);
+fpEl.textContent='Fingerprint: '+fp.slice(0,16)+'…';
+})();
 
-/* ========= STEP2 問題 ========= */
-const qText=document.getElementById('qText');
-const qArea=document.getElementById('qArea');
-const qRes=document.getElementById('qRes');
-let streak=0, qStart=0;
-
-const questions=[
-// 計算
-
-()=>{const a=1+Math.random()*9|0,b=1+Math.random()*9|0;qText.textContent=`${a}+${b} は？`;qArea.innerHTML='<input id="ans" type="number"><button class="secondary" id="ok">確認</button>';qStart=Date.now();ok.onclick=()=>{mark();Date.now()-qStart<500?fail():Number(ans.value)==a+b?success():fail();};},
-()=>{const c=['赤','青','緑','黄'],ans=c[Math.random()*4|0];qText.textContent=`「${ans}」を選択`;qArea.innerHTML=c.map(v=>`<button class="secondary">${v}</button>`).join('');qStart=Date.now();[...qArea.children].forEach(b=>b.onclick=()=>{mark();Date.now()-qStart<400?fail():b.textContent==ans?success():fail();});},
-()=>{const n=2+Math.random()*3|0;qText.textContent=`${n}秒待ってOK`;qArea.innerHTML='<button class="secondary" id="w">OK</button>';const s=Date.now();w.onclick=()=>{mark();Date.now()-s>=n*1000?success():fail();};}
-  ,
-// 大小比較
-()=>{const a=1+Math.random()*20|0,b=1+Math.random()*20|0;qText.textContent=`${a} と ${b}、大きいのは？`;qArea.innerHTML=`<button class=secondary>${a}</button><button class=secondary>${b}</button>`;qStart=Date.now();[...qArea.children].forEach(btn=>btn.onclick=()=>{mark();Date.now()-qStart<400?fail():Number(btn.textContent)===Math.max(a,b)?success():fail();});},
-// ひらがな判定
-()=>{const arr=['あ','ア','a','1'];const c=arr[Math.random()*arr.length|0];qText.textContent=`ひらがなを選んでください`;qArea.innerHTML=arr.map(v=>`<button class=secondary>${v}</button>`).join('');qStart=Date.now();[...qArea.children].forEach(btn=>btn.onclick=()=>{mark();btn.textContent==='あ'?success():fail();});}
-];
-
-function nextQ(){qText.textContent='';qArea.innerHTML='';qRes.textContent='';setTimeout(()=>questions[Math.random()*questions.length|0](),300);}
-function success(){streak++;qText.textContent='';qArea.innerHTML='';if(streak>=2){qRes.textContent='2連続正解！';qRes.className='ok';done.math=true;document.getElementById('step3').classList.add('active');update();}else{qRes.textContent='正解！次へ';qRes.className='ok';setTimeout(nextQ,600);}}
-function fail(){
-  failCount++;
-  localStorage.setItem('fail_count',failCount);
-  if(failCount>=5){
-    const until = Date.now()+5*60*1000;
-    localStorage.setItem('lock_until',until);
-    document.body.innerHTML = '<div style="display:grid;place-items:center;height:100%;color:#ef4444;font-size:18px">あなたはロボットです<br><small>5分間ロックされました</small></div>';
-    throw new Error('locked');
-  }
-streak=0;qText.textContent='';qArea.innerHTML='';qRes.textContent='不正解。やり直し';qRes.className='ng';setTimeout(nextQ,700);}
-
-/* ========= STEP3 ドラッグ ========= */
-const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
-const r=10;let x=20,y=cv.height/2,drag=false,startT=0;
-const modes=['normal','zigzag','slow','reverse'];
-const mode=modes[Math.random()*modes.length|0];
-const goal={x:cv.width-30,y:cv.height/2,r:14};
-let goalTimer=null;
-let goalHidden=false;
-const wall=cv.width/2;
-
-function draw(){
- ctx.clearRect(0,0,cv.width,cv.height);
- // ゴール（消えていなければ描画）
- if(!goalHidden){
-   ctx.beginPath();
-   ctx.arc(goal.x,goal.y,goal.r,0,Math.PI*2);
-   ctx.strokeStyle='#22c55e';
-   ctx.stroke();
- }
- // 壁
- if(mode==='zigzag'){
-   ctx.beginPath();ctx.moveTo(wall,0);ctx.lineTo(wall,cv.height);
-   ctx.strokeStyle='#ef4444';ctx.stroke();
- }
- // プレイヤー
- ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
- ctx.fillStyle='#60a5fa';ctx.fill();
- ctx.fillStyle='#94a3b8';ctx.font='10px system-ui';
- ctx.fillText('MODE:'+mode,8,12);
+// Lock
+const locked=localStorage.getItem('lock');
+if(locked && Date.now()<locked){
+msg.innerHTML='<span class="lock">あなたはロボットです<br>5分間ロック中</span>';
+chk.disabled=true;
 }
-function goalCheck(){
-  if(goalHidden) return;
-  const d = Math.hypot(x-goal.x,y-goal.y);
-  if(d <= goal.r){
-    if(mode==='slow' && Date.now()-startT < 1500) return;
-    if(!goalTimer){
-      dragRes.textContent='そのまま2秒待ってください…';
-      goalTimer = setTimeout(()=>{
-        goalHidden = true;
-        done.drag = true;
-        dragRes.textContent = '到達！';
-        dragRes.className = 'ok';
-        update();
-      },2000);
-    }
-  } else {
-    if(goalTimer){ clearTimeout(goalTimer); goalTimer=null; dragRes.textContent=''; }
-  }
-}}
-function hit(px,py){return Math.hypot(px-x,py-y)<=r;}
-draw();
-cv.onpointerdown=e=>{mark();const b=cv.getBoundingClientRect();const px=e.clientX-b.left,py=e.clientY-b.top;if(hit(px,py)){drag=true;startT=Date.now();cv.setPointerCapture(e.pointerId);}};
-cv.onpointermove=e=>{if(!drag)return;const b=cv.getBoundingClientRect();let nx=e.clientX-b.left,ny=e.clientY-b.top;if(mode==='reverse')ny=cv.height-ny;if(mode==='zigzag'&&x<wall&&nx>=wall)return;x=Math.max(r,Math.min(cv.width-r,nx));y=Math.max(r,Math.min(cv.height-r,ny));draw();goalCheck();};
-cv.onpointerup=()=>drag=false;
-</script>
-</body>
-</html>
+
+chk.onchange=()=>{ if(chk.checked) nextQuestion(); };
+
+function nextQuestion(){
+q.classList.remove('hidden');answers.innerHTML='';cv.classList.add('hidden');msg.textContent='';
+const base=['calc','color','compare','drag'];
+const mobile=('ontouchstart' in window);
+if(mobile) base.push('gesture');
+const t=base[Math.floor(Math.random()*base.length)];
+({calc:calcQ,color:colorQ,compare:compareQ,drag:dragQ,gesture:gestureQ})[t]();
+}
+
+function success(){
+correct++;q.classList.add('hidden');
+if(correct>=3){msg.textContent='確認完了';}
+else setTimeout(nextQuestion,400);
+}
+function failure(){
+fail++;correct=0;q.classList.add('hidden');entropy++;
+if(fail+entropy>=5){localStorage.setItem('lock',Date.now()+LOCK);
+msg.innerHTML='<span class="lock">あなたはロボットです<br>5分間ロック</span>';chk.disabled=true;}
+else setTimeout(nextQuestion,400);
+}
+
+function btn(txt,ok){const b=document.createElement('button');b.textContent=txt;b.onclick=()=>ok?success():failure();answers.appendChild(b);}
+
+function calcQ(){const a=~~(Math.random()*20),b=~~(Math.random()*20);qtext.textContent=`${a}+${b}は？`;[a+b,a+b+1,a+b-1].sort(()=>Math.random()-.5).forEach(v=>btn(v,v===a+b));}
+function colorQ(){qtext.textContent='青色を選んでください';['赤','青','緑','黄'].sort(()=>Math.random()-.5).forEach(v=>btn(v,v==='青'));}
+function compareQ(){const a=~~(Math.random()*99),b=~~(Math.random()*99);qtext.textContent=`大きい方は？ (${a}/${b})`;btn(a,a>b);btn(b,b>a);}
+
+function dragQ(){
+qtext.textContent='丸を中心に2秒置いてください';cv.classList.remove('hidden');
+goal={x:130,y:130,r:30};x=30;y=130;draw();
+cv.onpointerdown=()=>drag=true;
+cv.onpointerup=()=>{drag=false;if(hold){clearTimeout(hold);hold=null}};
+cv.onpointermove=e=>{if(!drag)return;const r=cv.getBoundingClientRect();x=e.clientX-r.left;y=e.clientY-r.top;const d=Math.hypot(x-goal.x,y-goal.y);
+if(d<=goal.r){if(!hold)hold=setTimeout(()=>{draw(false);success();},2000);}else{if(hold){clearTimeout(hold);hold=null}}draw();};
+}
+function draw(show=true){ctx.clearRect(0,0,260,260);if(show){ctx.beginPath();ctx.arc(goal.x,goal.y,goal.r,0,7);ctx.strokeStyle='#22c55e';ctx.stroke();}
+ctx.beginPath();ctx.arc(x,y,r,0,7);ctx.fillStyle='#60a5fa';ctx.fill();}
+
+function gestureQ(){
+qtext.textContent='右→下→左 にスワイプしてください';let seq=['r','d','l'],i=0,sx,sy;
+cv.classList.remove('hidden');ctx.clearRect(0,0,260,260);
+cv.onpointerdown=e=>{sx=e.clientX;sy=e.clientY};
+cv.onpointerup=e=>{const dx=e.clientX-sx,dy=e.clientY-sy;let g=Math.abs(dx)>Math.abs(dy)?(dx>0?'r':'l'):(dy>0?'d':'u');
+if(g===seq[i]){i++;if(i===seq.length)success();}else failure();};
+} </script>
+</
